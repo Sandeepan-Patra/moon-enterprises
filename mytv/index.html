@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zee Bangla HLS Test Player</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        min-height: 100vh;
+        background: #080808;
+        color: #eee;
+        font-family: Arial, sans-serif;
+        padding: 24px;
+    }
+    .wrap { max-width: 1100px; margin: auto; }
+    h1 { margin: 0 0 18px; font-size: 24px; }
+    .panel {
+        background: #151515;
+        border: 1px solid #2b2b2b;
+        border-radius: 12px;
+        padding: 18px;
+        margin-bottom: 18px;
+    }
+    label {
+        display: block;
+        margin: 12px 0 6px;
+        font-size: 13px;
+        color: #bbb;
+    }
+    input, textarea, button {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid #3a3a3a;
+        background: #0d0d0d;
+        color: #fff;
+        padding: 11px 12px;
+        font: inherit;
+    }
+    textarea { min-height: 70px; resize: vertical; }
+    button {
+        margin-top: 14px;
+        cursor: pointer;
+        background: #fff;
+        color: #111;
+        font-weight: 700;
+    }
+    video {
+        width: 100%;
+        max-height: 70vh;
+        background: #000;
+        border-radius: 10px;
+    }
+    #status {
+        margin-top: 12px;
+        padding: 10px;
+        border-radius: 8px;
+        background: #0d0d0d;
+        color: #bbb;
+        white-space: pre-wrap;
+    }
+    #log {
+        margin-top: 12px;
+        max-height: 220px;
+        overflow: auto;
+        background: #050505;
+        padding: 12px;
+        border-radius: 8px;
+        font: 12px/1.5 Consolas, monospace;
+        white-space: pre-wrap;
+    }
+    .note {
+        color: #aaa;
+        font-size: 13px;
+        line-height: 1.5;
+        margin-top: 10px;
+    }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <h1>HLS / M3U8 Test Player</h1>
+
+    <div class="panel">
+        <label>M3U8 URL</label>
+        <input id="url" value="https://bldcmprod-cdn.toffeelive.com/cdn/live/zee_bangla/playlist.m3u8">
+
+        <label>Cookie (diagnostic only)</label>
+        <textarea id="cookie" placeholder="Paste only a cookie you are authorized to use."></textarea>
+
+        <label>User-Agent (diagnostic only)</label>
+        <input id="userAgent" placeholder="Example: Toffee (Linux;Android 14)">
+
+        <button id="play">Test stream</button>
+
+        <div class="note">
+            Important: normal browser JavaScript cannot set the HTTP Cookie or User-Agent
+            request headers directly. The fields above are displayed for diagnostics;
+            they are not silently sent as forged headers. A protected CDN may require
+            server-side authentication or a same-origin cookie.
+        </div>
+
+        <div id="status">Ready.</div>
+        <div id="log"></div>
+    </div>
+
+    <video id="video" controls autoplay muted playsinline></video>
+</div>
+
+<script>
+const video = document.getElementById('video');
+const urlInput = document.getElementById('url');
+const cookieInput = document.getElementById('cookie');
+const uaInput = document.getElementById('userAgent');
+const statusBox = document.getElementById('status');
+const logBox = document.getElementById('log');
+const playButton = document.getElementById('play');
+
+let hls = null;
+
+function log(message) {
+    const line = `[${new Date().toLocaleTimeString()}] ${message}`;
+    console.log(line);
+    logBox.textContent += line + "\n";
+    logBox.scrollTop = logBox.scrollHeight;
+}
+
+function status(message) {
+    statusBox.textContent = message;
+    log(message);
+}
+
+function destroyPlayer() {
+    if (hls) {
+        hls.destroy();
+        hls = null;
+    }
+    video.removeAttribute('src');
+    video.load();
+}
+
+playButton.addEventListener('click', () => {
+    const streamUrl = urlInput.value.trim();
+
+    if (!streamUrl) {
+        status('Enter an M3U8 URL.');
+        return;
+    }
+
+    destroyPlayer();
+    logBox.textContent = '';
+
+    // These values are intentionally NOT injected as Cookie/User-Agent headers.
+    // Browsers restrict those headers from page JavaScript.
+    const suppliedCookie = cookieInput.value.trim();
+    const suppliedUA = uaInput.value.trim();
+
+    if (suppliedCookie) {
+        log('Cookie supplied for diagnostics; browser JS cannot set Cookie header directly.');
+    }
+    if (suppliedUA) {
+        log('User-Agent supplied for diagnostics; browser JS cannot override User-Agent directly.');
+    }
+
+    status('Loading M3U8...');
+
+    if (Hls.isSupported()) {
+        hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            xhrSetup: function(xhr) {
+                // Send browser-managed cookies when the CDN has legitimately
+                // established a cookie for this origin and CORS permits it.
+                xhr.withCredentials = true;
+            }
+        });
+
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_LOADING, () => status('Requesting manifest...'));
+
+        hls.on(Hls.Events.MANIFEST_LOADED, () => {
+            status('Manifest received. Waiting for media...');
+        });
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            status('Manifest parsed. Starting playback...');
+            video.play().catch(err => log('Autoplay blocked: ' + err.message));
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            log(`HLS error: type=${data.type}, details=${data.details}, fatal=${data.fatal}`);
+
+            if (data.response) {
+                log(`HTTP response: ${data.response.code || 'unknown'}`);
+            }
+
+            if (data.fatal) {
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                    status('Network/CORS/authentication error. Check the browser console and CDN response.');
+                    hls.startLoad();
+                } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                    status('Media error. Attempting recovery...');
+                    hls.recoverMediaError();
+                } else {
+                    status('Fatal HLS error. Player stopped.');
+                    hls.destroy();
+                }
+            }
+        });
+
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS (mainly Safari). Browser-managed cookies may be used,
+        // but arbitrary Cookie/User-Agent headers cannot be supplied here.
+        video.src = streamUrl;
+        video.addEventListener('loadedmetadata', () => {
+            status('Native HLS metadata loaded. Starting playback...');
+            video.play().catch(() => {});
+        }, { once: true });
+
+        video.addEventListener('error', () => {
+            status('Native HLS playback failed. Check CORS/authentication.');
+        }, { once: true });
+
+    } else {
+        status('This browser does not support HLS.');
+    }
+});
+</script>
+</body>
+</html>
