@@ -1,62 +1,209 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zee Bangla Live</title>
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
-    <style>
-        body {
-            margin: 0;
-            background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-        video {
-            width: 100%;
-            max-width: 1000px;
-            height: auto;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPTV Web Player</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080808;color:#eee;font-family:Arial,sans-serif;height:100vh;overflow:hidden}
+header{height:64px;background:#111;display:flex;align-items:center;padding:0 18px;gap:14px;border-bottom:1px solid #222}
+.logo{font-size:22px;font-weight:bold;white-space:nowrap}
+input{background:#1c1c1c;border:1px solid #333;color:#fff;padding:11px 14px;border-radius:7px;outline:none;width:280px}
+button{background:#222;color:#fff;border:1px solid #444;padding:10px 14px;border-radius:7px;cursor:pointer}
+button:hover{background:#333}
+.layout{height:calc(100vh - 64px);display:grid;grid-template-columns:340px 1fr}
+.sidebar{border-right:1px solid #222;overflow:auto;background:#0d0d0d}
+.sidehead{padding:14px;border-bottom:1px solid #222;position:sticky;top:0;background:#0d0d0d;z-index:2}
+.channel{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #181818;cursor:pointer}
+.channel:hover,.channel.active{background:#1b1b1b}
+.channel img{width:42px;height:42px;object-fit:contain;background:#151515;border-radius:6px}
+.name{font-size:14px;line-height:1.3}
+.group{font-size:11px;color:#888;margin-top:3px}
+.main{position:relative;display:flex;flex-direction:column;min-width:0}
+.player{background:#000;flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+video{width:100%;height:100%;object-fit:contain}
+.now{height:64px;background:#111;border-top:1px solid #222;padding:10px 16px}
+.title{font-weight:bold}.status{font-size:12px;color:#888;margin-top:4px}
+.empty{text-align:center;color:#777;padding:30px}
+@media(max-width:700px){.layout{grid-template-columns:1fr}.sidebar{position:absolute;z-index:5;width:85%;height:calc(100vh - 64px);left:-100%;transition:.2s}.sidebar.open{left:0}.menu{display:block!important}input{width:160px}.now{height:58px}}
+.menu{display:none}
+</style>
 </head>
 <body>
 
-<video id="video" controls autoplay muted playsinline></video>
- 
+<header>
+<button class="menu" onclick="toggleMenu()">☰</button>
+<div class="logo">IPTV Player</div>
+<input id="search" placeholder="Search channels..." oninput="render()">
+<button onclick="loadPlaylist()">↻ Reload</button>
+</header>
+
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+<div class="sidehead">
+<select id="country" onchange="render()" style="width:100%;background:#1c1c1c;color:#fff;border:1px solid #333;padding:10px;border-radius:7px">
+<option value="">All countries</option>
+</select>
+</div>
+<div id="channels"></div>
+</aside>
+
+<main class="main">
+<div class="player">
+<video id="video" controls playsinline></video>
+</div>
+<div class="now">
+<div class="title" id="nowTitle">Select a channel</div>
+<div class="status" id="status">Loading playlist...</div>
+</div>
+</main>
+</div>
+
 <script>
-const video = document.getElementById('video');
-const streamUrl = 'https://itpolly.iptv.digijadoo.net/live/zee_bangla/chunks.m3u8';
+const PLAYLIST_URL = "https://iptv-org.github.io/iptv/index.m3u";
+let channels = [];
+let hls = null;
+let current = -1;
 
-if (Hls.isSupported()) {
-    const hls = new Hls();
-    hls.loadSource(streamUrl);
-    hls.attachMedia(video);
-
-    hls.on(Hls.Events.MANIFEST_PARSED, function () {
-        video.play().catch(() => {});
-    });
-
-    hls.on(Hls.Events.ERROR, function (event, data) {
-        console.log('HLS Error:', data);
-        if (data.fatal) {
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                hls.startLoad();
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                hls.recoverMediaError();
-            }
-        }
-    });
-} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = streamUrl;
-    video.addEventListener('loadedmetadata', function () {
-        video.play().catch(() => {});
-    });
-} else {
-    alert('This browser does not support HLS streaming.');
+async function loadPlaylist(){
+  document.getElementById("status").textContent="Loading playlist...";
+  try{
+    const r = await fetch(PLAYLIST_URL);
+    if(!r.ok) throw new Error("Playlist request failed");
+    const text = await r.text();
+    channels = parseM3U(text);
+    buildCountries();
+    render();
+    document.getElementById("status").textContent =
+      channels.length + " channels loaded";
+  }catch(e){
+    console.error(e);
+    document.getElementById("status").textContent =
+      "Could not load playlist. Check browser CORS/network access.";
+  }
 }
-</script>
 
+function parseM3U(text){
+  const lines=text.split(/\r?\n/);
+  const out=[];
+  let info=null;
+  for(const raw of lines){
+    const line=raw.trim();
+    if(!line) continue;
+    if(line.startsWith("#EXTINF")){
+      const attrs={};
+      const re=/([\\w-]+)="([^"]*)"/g;
+      let m;
+      while((m=re.exec(line))) attrs[m[1]]=m[2];
+      const comma=line.indexOf(",");
+      const title=comma>=0?line.slice(comma+1).trim():(attrs["tvg-name"]||"Unknown");
+      info={title,logo:attrs["tvg-logo"]||"",group:attrs["group-title"]||"Other",country:attrs["tvg-country"]||""};
+    }else if(!line.startsWith("#") && info){
+      out.push({...info,url:line});
+      info=null;
+    }
+  }
+  return out;
+}
+
+function buildCountries(){
+  const select=document.getElementById("country");
+  const old=select.value;
+  const set=new Set();
+  channels.forEach(c=>{
+    c.country.split(";").map(x=>x.trim()).filter(Boolean).forEach(x=>set.add(x));
+  });
+  select.innerHTML='<option value="">All countries</option>';
+  [...set].sort().forEach(c=>{
+    const o=document.createElement("option");
+    o.value=c;o.textContent=c;select.appendChild(o);
+  });
+  select.value=old;
+}
+
+function render(){
+  const q=document.getElementById("search").value.toLowerCase();
+  const country=document.getElementById("country").value;
+  const box=document.getElementById("channels");
+  box.innerHTML="";
+  const filtered=channels
+    .map((c,i)=>({...c,index:i}))
+    .filter(c=>
+      (!q || c.title.toLowerCase().includes(q) || c.group.toLowerCase().includes(q)) &&
+      (!country || c.country.split(";").map(x=>x.trim()).includes(country))
+    );
+
+  if(!filtered.length){
+    box.innerHTML='<div class="empty">No channels found</div>';
+    return;
+  }
+
+  const frag=document.createDocumentFragment();
+  filtered.forEach(c=>{
+    const div=document.createElement("div");
+    div.className="channel"+(c.index===current?" active":"");
+    div.onclick=()=>play(c.index);
+    if(c.logo){
+      const img=document.createElement("img");
+      img.src=c.logo;
+      img.onerror=()=>img.style.visibility="hidden";
+      div.appendChild(img);
+    }else{
+      const spacer=document.createElement("div");
+      spacer.style.width="42px";spacer.style.height="42px";
+      div.appendChild(spacer);
+    }
+    const text=document.createElement("div");
+    text.innerHTML='<div class="name"></div><div class="group"></div>';
+    text.querySelector(".name").textContent=c.title;
+    text.querySelector(".group").textContent=c.group;
+    div.appendChild(text);
+    frag.appendChild(div);
+  });
+  box.appendChild(frag);
+}
+
+function play(i){
+  const c=channels[i];
+  if(!c) return;
+  current=i;
+  document.getElementById("nowTitle").textContent=c.title;
+  document.getElementById("status").textContent="Connecting...";
+  const video=document.getElementById("video");
+
+  if(hls){hls.destroy();hls=null}
+
+  if(Hls.isSupported()){
+    hls=new Hls({enableWorker:true});
+    hls.loadSource(c.url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED,()=>{
+      document.getElementById("status").textContent="Live";
+      video.play().catch(()=>{});
+    });
+    hls.on(Hls.Events.ERROR,(event,data)=>{
+      if(data.fatal){
+        document.getElementById("status").textContent="Stream unavailable";
+      }
+    });
+  }else if(video.canPlayType("application/vnd.apple.mpegurl")){
+    video.src=c.url;
+    video.play().catch(()=>{});
+    document.getElementById("status").textContent="Live";
+  }else{
+    document.getElementById("status").textContent="HLS not supported";
+  }
+  render();
+  if(window.innerWidth<=700) document.getElementById("sidebar").classList.remove("open");
+}
+
+function toggleMenu(){
+  document.getElementById("sidebar").classList.toggle("open");
+}
+
+loadPlaylist();
+</script>
 </body>
 </html>
