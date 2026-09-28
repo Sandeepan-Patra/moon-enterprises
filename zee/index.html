@@ -1,283 +1,211 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sandeepan TV - Zee Bangla Live</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sandeepan TV</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<style>
+:root{--bg:#0f1016;--panel:#181a24;--line:#2a2d3b;--text:#eceaf2;--mute:#9a9cb0;--live:#e5405e}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100vh}
+button,input{font:inherit}
+:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.hidden{display:none!important}
 
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+/* Passcode gate */
+#gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.gate-box{width:100%;max-width:340px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px 24px;text-align:center}
+.gate-box h1{font-size:22px;margin:0 0 6px}
+.gate-box p{margin:0 0 20px;color:var(--mute);font-size:14px}
+#pin{width:100%;padding:14px;text-align:center;font-size:24px;letter-spacing:10px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px}
+#pinErr{min-height:20px;margin:10px 0;color:var(--live);font-size:13px}
+.btn{width:100%;padding:13px;border:0;border-radius:10px;background:var(--live);color:#fff;font-weight:bold;cursor:pointer}
 
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+/* Channel grid */
+#app{max-width:1000px;margin:0 auto;padding:24px 16px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.top h1{margin:0;font-size:24px}
+.lock{background:none;border:1px solid var(--line);color:var(--mute);padding:8px 14px;border-radius:8px;cursor:pointer}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0;color:var(--text);text-align:left;cursor:pointer;overflow:hidden}
+.card:hover{border-color:#4a4e66}
+.card[disabled]{opacity:.45;cursor:not-allowed}
+.thumb{height:110px;display:flex;align-items:center;justify-content:center;font-size:44px;font-weight:bold;color:#fff}
+.meta{padding:12px 14px}
+.meta b{display:block;font-size:16px}
+.meta span{font-size:13px;color:var(--mute)}
 
-        body {
-            margin: 0;
-            background: #000;
-            color: #fff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            font-family: Arial, sans-serif;
-        }
-
-        .player-container {
-            width: 100%;
-            max-width: 1000px;
-            text-align: center;
-        }
-
-        .channel-name {
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 12px;
-        }
-
-        .status {
-            font-size: 14px;
-            color: #aaa;
-            margin-bottom: 10px;
-        }
-
-        video {
-            width: 100%;
-            height: auto;
-            display: block;
-            background: #000;
-        }
-    </style>
+/* Player */
+#player .bar{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.back{background:none;border:1px solid var(--line);color:var(--text);padding:8px 14px;border-radius:8px;cursor:pointer}
+#chName{font-size:20px;font-weight:bold}
+#status{font-size:14px;color:var(--mute);margin-bottom:10px}
+#status.live{color:var(--live);font-weight:bold}
+video{width:100%;height:auto;display:block;background:#000;border-radius:10px}
+</style>
 </head>
-
 <body>
 
-<div class="player-container">
+<!-- Passcode gate: shown on every page load/refresh -->
+<div id="gate">
+  <div class="gate-box">
+    <h1>Sandeepan TV</h1>
+    <p>Enter the passcode to view channels</p>
+    <input id="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" aria-label="Passcode">
+    <div id="pinErr" role="alert"></div>
+    <button class="btn" id="pinBtn">Unlock</button>
+  </div>
+</div>
 
-    <div class="channel-name">
+<!-- Channels are only rendered after unlock -->
+<div id="app" class="hidden">
+  <div id="list">
+    <div class="top">
+      <h1>Channels</h1>
+      <button class="lock" id="lockBtn">Lock</button>
     </div>
+    <div id="grid"></div>
+  </div>
 
-    <div id="status" class="status">
-        Connecting...
+  <div id="player" class="hidden">
+    <div class="bar">
+      <button class="back" id="backBtn">Back</button>
+      <div id="chName"></div>
     </div>
-
+    <div id="status">Connecting...</div>
     <video id="video" controls autoplay muted playsinline></video>
-
+  </div>
 </div>
 
 <script>
+const PASSCODE = '1958';
 
-const video = document.getElementById('video');
-const statusText = document.getElementById('status');
+/* Add or edit channels here. Cards with an empty url show as "Not set up". */
+const CHANNELS = [
+  { name: 'Zee Bangla', lang: 'Bengali', color: '#c2334f', url: 'https://d1rc86nwwc9fag.cloudfront.net/260723/smil:zeebangla.smil/chunklist_b2628000.m3u8' },
+  { name: 'Zee Bangla Sonar',  lang: 'Bengali', color: '#3b5bdb', url: 'https://d1g8wgjurz8via.cloudfront.net/bpk-tv/ColorsHD/default/ColorsHD-video=2137600.m3u8' },
+  { name: 'Aastha',  lang: 'Bhakti', color: '#0b7a75', url: 'https://aasthaott.akamaized.net/110923/smil:aasthatv.smil/chunklist_b4628000.m3u8' },
+  { name: 'Sanskar',  lang: 'Bhakti', color: '#8a4fbf', url: 'https://d26idhjf0y1p2g.cloudfront.net/out/v1/cd66dd25b9774cb29943bab54bbf3e2f/index_20.m3u8' },
+  { name: 'Aajtak',  lang: 'News', color: '#8a4fbf', url: 'https://feeds.intoday.in/aajtak/api/aajtakhd/master.m3u8' },
+  { name: 'Color Cineplex',  lang: 'Movies', color: '#8a4fbf', url: 'http://202.70.146.135:8000/play/a058/index.m3u8' }
+];
 
-const streamUrl =
-    'https://tvsen6.aynaott.com/ZeeBangla/index.m3u8';
-
-let hls = null;
-let retryTimer = null;
-let retryCount = 0;
-
+const $ = id => document.getElementById(id);
+const video = $('video'), statusText = $('status');
 const RETRY_DELAY = 5000;
+let hls = null, retryTimer = null, currentUrl = null;
 
+/* ---------- Passcode ---------- */
+function tryUnlock() {
+  if ($('pin').value === PASSCODE) {
+    $('gate').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    renderGrid();
+  } else {
+    $('pinErr').textContent = 'Wrong passcode. Try again.';
+    $('pin').value = '';
+    $('pin').focus();
+  }
+}
+$('pinBtn').onclick = tryUnlock;
+$('pin').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
+$('pin').addEventListener('input', () => { $('pinErr').textContent = ''; });
 
-function setStatus(message) {
-    statusText.textContent = message;
+$('lockBtn').onclick = () => location.reload();
+$('pin').focus();
+
+/* ---------- Channel cards ---------- */
+function renderGrid() {
+  const grid = $('grid');
+  grid.innerHTML = '';
+  CHANNELS.forEach(ch => {
+    const b = document.createElement('button');
+    b.className = 'card';
+    b.disabled = !ch.url;
+    b.innerHTML =
+      '<div class="thumb" style="background:' + ch.color + '">' + ch.name.charAt(0) + '</div>' +
+      '<div class="meta"><b></b><span></span></div>';
+    b.querySelector('b').textContent = ch.name;
+    b.querySelector('span').textContent = ch.url ? ch.lang + ' \u2022 Live' : 'Not set up';
+    b.onclick = () => openChannel(ch);
+    grid.appendChild(b);
+  });
 }
 
-
-/* -----------------------------
-   START STREAM
------------------------------- */
-
-function startStream() {
-
-    clearTimeout(retryTimer);
-
-    setStatus('Connecting to Sandeepan TV...');
-
-    /* HLS.js browsers */
-
-    if (Hls.isSupported()) {
-
-        if (hls) {
-            hls.destroy();
-            hls = null;
-        }
-
-        hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true
-        });
-
-        hls.loadSource(streamUrl);
-        hls.attachMedia(video);
-
-
-        /* Manifest loaded */
-
-        hls.on(Hls.Events.MANIFEST_PARSED, function () {
-
-            retryCount = 0;
-
-            setStatus('LIVE');
-
-            video.play().catch(() => {});
-
-        });
-
-
-        /* Errors */
-
-        hls.on(Hls.Events.ERROR, function (event, data) {
-
-            console.log('HLS Error:', data);
-
-            if (!data.fatal) {
-                return;
-            }
-
-            setStatus('Stream unavailable — retrying...');
-
-            console.log(
-                'Fatal error:',
-                data.type,
-                data.details
-            );
-
-
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-
-                hls.destroy();
-                hls = null;
-
-                retryStream();
-
-            }
-
-            else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-
-                console.log('Recovering media error...');
-
-                try {
-                    hls.recoverMediaError();
-                }
-                catch (e) {
-                    retryStream();
-                }
-
-            }
-
-            else {
-
-                hls.destroy();
-                hls = null;
-
-                retryStream();
-
-            }
-
-        });
-
-    }
-
-
-    /* -----------------------------
-       Native HLS (Safari/iPhone)
-    ------------------------------ */
-
-    else if (
-        video.canPlayType('application/vnd.apple.mpegurl')
-    ) {
-
-        video.src = streamUrl;
-
-        video.addEventListener(
-            'loadedmetadata',
-            function () {
-
-                retryCount = 0;
-
-                setStatus('LIVE');
-
-                video.play().catch(() => {});
-
-            },
-            { once: true }
-        );
-
-
-        video.addEventListener('error', function () {
-
-            setStatus('Stream unavailable — retrying...');
-
-            retryStream();
-
-        });
-
-    }
-
-
-    else {
-
-        setStatus('HLS is not supported in this browser.');
-
-    }
-
+function openChannel(ch) {
+  $('list').classList.add('hidden');
+  $('player').classList.remove('hidden');
+  $('chName').textContent = ch.name;
+  currentUrl = ch.url;
+  startStream();
 }
 
+$('backBtn').onclick = () => {
+  stopStream();
+  $('player').classList.add('hidden');
+  $('list').classList.remove('hidden');
+};
 
-/* -----------------------------
-   RETRY STREAM
------------------------------- */
+/* ---------- Streaming ---------- */
+function setStatus(msg, live) {
+  statusText.textContent = msg;
+  statusText.className = live ? 'live' : '';
+}
+
+function stopStream() {
+  clearTimeout(retryTimer);
+  currentUrl = null;
+  if (hls) { hls.destroy(); hls = null; }
+  video.onerror = null;
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+}
 
 function retryStream() {
-
-    clearTimeout(retryTimer);
-
-    retryCount++;
-
-    setStatus(
-        'Stream unavailable — retrying in ' +
-        (RETRY_DELAY / 1000) +
-        ' seconds...'
-    );
-
-    retryTimer = setTimeout(function () {
-
-        console.log(
-            'Retry attempt:',
-            retryCount
-        );
-
-        startStream();
-
-    }, RETRY_DELAY);
-
+  clearTimeout(retryTimer);
+  if (!currentUrl) return;
+  setStatus('Stream unavailable \u2014 retrying in ' + (RETRY_DELAY / 1000) + ' seconds...');
+  retryTimer = setTimeout(startStream, RETRY_DELAY);
 }
 
+function startStream() {
+  clearTimeout(retryTimer);
+  if (!currentUrl) return;
+  const url = currentUrl;
+  setStatus('Connecting...');
 
-/* -----------------------------
-   VIDEO ERROR
------------------------------- */
+  if (window.Hls && Hls.isSupported()) {
+    if (hls) { hls.destroy(); hls = null; }
+    hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+    hls.loadSource(url);
+    hls.attachMedia(video);
 
-video.addEventListener('error', function () {
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      setStatus('LIVE', true);
+      video.play().catch(() => {});
+    });
 
-    console.log('Video error');
-
-    setStatus('Stream unavailable — retrying...');
-
-    retryStream();
-
-});
-
-
-/* -----------------------------
-   START
------------------------------- */
-
-startStream();
-
+    hls.on(Hls.Events.ERROR, (e, data) => {
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        try { hls.recoverMediaError(); return; } catch (err) {}
+      }
+      hls.destroy(); hls = null;
+      retryStream();
+    });
+  }
+  else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url;
+    video.onloadedmetadata = () => { setStatus('LIVE', true); video.play().catch(() => {}); };
+    video.onerror = retryStream;
+  }
+  else {
+    setStatus('HLS is not supported in this browser.');
+  }
+}
 </script>
-
 </body>
 </html>
