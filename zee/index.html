@@ -75,11 +75,10 @@ video:focus{border-color:#fff}
     <div class="bar">
       <button class="back" id="backBtn">Back</button>
       <div id="chName"></div>
-      <!-- Open in new tab link -->
       <a id="externalLink" class="external-btn" href="#" target="_blank" rel="noopener noreferrer">↗ Open Direct in New Tab</a>
     </div>
     <div id="status">Connecting...</div>
-    <video id="video" controls autoplay muted playsinline tabindex="0"></video>
+    <video id="video" controls playsinline tabindex="0"></video>
   </div>
 </div>
 
@@ -105,6 +104,7 @@ const CHANNELS = [
   { name: 'ABP News', lang: 'News', color: '#ae3ec9', url: 'https://d1rc86nwwc9fag.cloudfront.net/vglive-sk-472500/abpnews/master.m3u8' },
   { name: 'B4U Cineplex', lang: 'Movies', color: '#2f7d32', url: 'https://streams.tangotv.in/B4UMOVIES/ORIGIN/tracks-v1a1/mono.m3u8' }
 ];
+
 
 const $ = id => document.getElementById(id);
 const video = $('video'), statusText = $('status'), extLink = $('externalLink');
@@ -152,6 +152,16 @@ function renderGrid() {
   });
 }
 
+function requestVideoFullscreen() {
+  if (video.requestFullscreen) {
+    video.requestFullscreen().catch(() => {});
+  } else if (video.webkitRequestFullscreen) {
+    video.webkitRequestFullscreen();
+  } else if (video.webkitEnterFullscreen) {
+    video.webkitEnterFullscreen(); // iOS Safari
+  }
+}
+
 function openChannel(ch, card) {
   lastCard = card;
   playerOpen = true;
@@ -160,16 +170,24 @@ function openChannel(ch, card) {
   $('player').classList.remove('hidden');
   $('chName').textContent = ch.name;
   
-  // Set the external open link target
   extLink.href = ch.url;
-
   currentUrl = ch.url;
+
+  // 1. Unmute immediately
+  video.muted = false;
+  video.volume = 1.0;
+
+  // 2. Request Fullscreen on user click
+  requestVideoFullscreen();
+
   startStream();
   video.focus();
 }
 
 function showMenu() {
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
   stopStream();
   playerOpen = false;
   $('player').classList.add('hidden');
@@ -262,7 +280,7 @@ function onKey(e) {
     if (document.activeElement === $('backBtn')) closePlayer();
     else if (document.activeElement === extLink) window.open(extLink.href, '_blank');
     else if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
-    else if (video.requestFullscreen) video.requestFullscreen().catch(function () {});
+    else requestVideoFullscreen();
   }
 }
 window.addEventListener('keydown', onKey, true);
@@ -291,13 +309,24 @@ function retryStream() {
   retryTimer = setTimeout(startStream, RETRY_DELAY);
 }
 
+function playVideo() {
+  video.muted = false;
+  const p = video.play();
+  if (p !== undefined) {
+    p.catch(() => {
+      // If browser blocks unmuted autoplay, play muted first so stream loads
+      video.muted = true;
+      video.play().catch(() => {});
+    });
+  }
+}
+
 function startStream() {
   clearTimeout(retryTimer);
   if (!currentUrl) return;
   const url = currentUrl;
   setStatus('Connecting...');
 
-  // Alert if Mixed Content blocking will occur
   if (window.location.protocol === 'https:' && url.startsWith('http://')) {
     setStatus('Blocked by browser (Mixed Content: HTTPS site cannot play insecure HTTP stream). Click "Open Direct in New Tab" above.');
     return;
@@ -311,7 +340,7 @@ function startStream() {
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       setStatus('LIVE', true);
-      video.play().catch(() => {});
+      playVideo();
     });
 
     hls.on(Hls.Events.ERROR, (e, data) => {
@@ -325,7 +354,10 @@ function startStream() {
   }
   else if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = url;
-    video.onloadedmetadata = () => { setStatus('LIVE', true); video.play().catch(() => {}); };
+    video.onloadedmetadata = () => { 
+      setStatus('LIVE', true); 
+      playVideo(); 
+    };
     video.onerror = retryStream;
   }
   else {
