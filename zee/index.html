@@ -153,6 +153,15 @@ function renderGrid() {
 }
 
 /* ---------- Open / close player (Back goes to the menu) ---------- */
+function getStreamUrl(url) {
+    // HTTPS website + HTTP stream → use your HTTPS proxy
+    if (location.protocol === 'https:' && url.startsWith('http://')) {
+        return 'hls-proxy.php?url=' + encodeURIComponent(url);
+    }
+
+    // HTTP website / local file → use original stream
+    return url;
+}
 function openChannel(ch, card) {
   lastCard = card;
   playerOpen = true;
@@ -160,7 +169,7 @@ function openChannel(ch, card) {
   $('list').classList.add('hidden');
   $('player').classList.remove('hidden');
   $('chName').textContent = ch.name;
-  currentUrl = ch.url;
+  currentUrl = getStreamUrl(ch.url);
   startStream();
   video.focus();
 }
