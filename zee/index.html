@@ -10,7 +10,7 @@
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100vh}
-button,input{font:inherit}
+button,input,a{font:inherit}
 :focus{outline:none}
 .hidden{display:none!important}
 
@@ -39,9 +39,10 @@ button,input{font:inherit}
 .meta span{font-size:13px;color:var(--mute)}
 
 /* Player */
-#player .bar{display:flex;align-items:center;gap:14px;margin-bottom:12px}
-.back{background:none;border:3px solid var(--line);color:var(--text);padding:8px 16px;border-radius:8px;cursor:pointer}
-.back:focus{border-color:#fff}
+#player .bar{display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap}
+.back, .external-btn{background:none;border:3px solid var(--line);color:var(--text);padding:8px 16px;border-radius:8px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.back:focus, .external-btn:focus{border-color:#fff}
+.external-btn{font-size:13px;background:var(--panel)}
 #chName{font-size:22px;font-weight:bold}
 #status{font-size:14px;color:var(--mute);margin-bottom:10px}
 #status.live{color:var(--live);font-weight:bold}
@@ -74,6 +75,8 @@ video:focus{border-color:#fff}
     <div class="bar">
       <button class="back" id="backBtn">Back</button>
       <div id="chName"></div>
+      <!-- Open in new tab link -->
+      <a id="externalLink" class="external-btn" href="#" target="_blank" rel="noopener noreferrer">↗ Open Direct in New Tab</a>
     </div>
     <div id="status">Connecting...</div>
     <video id="video" controls autoplay muted playsinline tabindex="0"></video>
@@ -82,7 +85,7 @@ video:focus{border-color:#fff}
 
 <script>
 const PASSCODE = '1958';
-const DEBUG = true;   // shows the last remote key at bottom-left; set to false when done
+const DEBUG = true;
 
 const CHANNELS = [
   { name: 'Zee Bangla', lang: 'Bengali', color: '#c2334f', url: 'https://d1rc86nwwc9fag.cloudfront.net/260723/smil:zeebangla.smil/chunklist_b2628000.m3u8' },
@@ -102,15 +105,12 @@ const CHANNELS = [
   { name: 'B4U Cineplex', lang: 'Movies', color: '#2f7d32', url: 'https://streams.tangotv.in/B4UMOVIES/ORIGIN/tracks-v1a1/mono.m3u8' }
 ];
 
-
-
 const $ = id => document.getElementById(id);
-const video = $('video'), statusText = $('status');
+const video = $('video'), statusText = $('status'), extLink = $('externalLink');
 const RETRY_DELAY = 5000;
 let hls = null, retryTimer = null, currentUrl = null;
 let unlocked = false, playerOpen = false, lastCard = null;
 
-/* ---------- Passcode (auto-submits at 4 digits for remote use) ---------- */
 function tryUnlock() {
   if ($('pin').value === PASSCODE) {
     unlocked = true;
@@ -133,7 +133,6 @@ $('pin').addEventListener('input', () => {
 });
 $('pin').focus();
 
-/* ---------- Channel cards ---------- */
 function renderGrid() {
   const grid = $('grid');
   grid.innerHTML = '';
@@ -152,24 +151,18 @@ function renderGrid() {
   });
 }
 
-/* ---------- Open / close player (Back goes to the menu) ---------- */
-function getStreamUrl(url) {
-    // HTTPS website + HTTP stream → use your HTTPS proxy
-    if (location.protocol === 'https:' && url.startsWith('http://')) {
-        return 'hls-proxy.php?url=' + encodeURIComponent(url);
-    }
-
-    // HTTP website / local file → use original stream
-    return url;
-}
 function openChannel(ch, card) {
   lastCard = card;
   playerOpen = true;
-  history.pushState({ player: true }, '');   // so the remote's Back returns to the menu
+  history.pushState({ player: true }, '');
   $('list').classList.add('hidden');
   $('player').classList.remove('hidden');
   $('chName').textContent = ch.name;
-  currentUrl = getStreamUrl(ch.url);
+  
+  // Set the external open link target
+  extLink.href = ch.url;
+
+  currentUrl = ch.url;
   startStream();
   video.focus();
 }
@@ -184,14 +177,13 @@ function showMenu() {
 }
 
 function closePlayer() {
-  if (history.state && history.state.player) history.back();  // popstate -> showMenu
+  if (history.state && history.state.player) history.back();
   else showMenu();
 }
 
 window.addEventListener('popstate', () => { if (playerOpen) showMenu(); });
 $('backBtn').onclick = closePlayer;
 
-/* ---------- Remote / keyboard ---------- */
 function center(el) {
   const r = el.getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -216,7 +208,6 @@ function moveFocus(dir) {
   if (best) best.focus();
 }
 
-/* Many TV browsers only send keyCode (no e.key), so normalise both */
 function keyName(e) {
   var c = e.keyCode || e.which, k = e.key;
   if (c === 37 || k === 'ArrowLeft' || k === 'Left') return 'left';
@@ -229,7 +220,6 @@ function keyName(e) {
   return '';
 }
 
-/* Debug readout */
 var dbg = null;
 if (DEBUG) {
   dbg = document.createElement('div');
@@ -241,10 +231,10 @@ if (DEBUG) {
 function onKey(e) {
   var k = keyName(e);
   if (dbg) dbg.textContent = 'key=' + e.key + '  code=' + (e.keyCode || e.which) + '  action=' + (k || 'none');
-  if (!unlocked || !k) return;                 // passcode box handles its own keys
+  if (!unlocked || !k) return;
 
-  if (!playerOpen) {                           // MENU
-    if (k === 'back') { e.preventDefault(); return; }   // stay on the menu
+  if (!playerOpen) {
+    if (k === 'back') { e.preventDefault(); return; }
     if (k === 'ok') {
       var a = document.activeElement;
       if (a && a.classList.contains('card')) { e.preventDefault(); a.click(); }
@@ -255,30 +245,29 @@ function onKey(e) {
     return;
   }
 
-  /* PLAYER */
-  e.preventDefault();
   if (k === 'back') {
+    e.preventDefault();
     if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
     else closePlayer();
   }
   else if (k === 'left') $('backBtn').focus();
-  else if (k === 'right') video.focus();
+  else if (k === 'right') extLink.focus();
   else if (k === 'up' || k === 'down') {
+    e.preventDefault();
     video.muted = false;
     video.volume = Math.min(1, Math.max(0, video.volume + (k === 'up' ? 0.1 : -0.1)));
   }
   else if (k === 'ok') {
     if (document.activeElement === $('backBtn')) closePlayer();
+    else if (document.activeElement === extLink) window.open(extLink.href, '_blank');
     else if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
     else if (video.requestFullscreen) video.requestFullscreen().catch(function () {});
   }
 }
 window.addEventListener('keydown', onKey, true);
 
-/* Samsung Tizen needs the Back key registered; harmless elsewhere */
 try { if (window.tizen && tizen.tvinputdevice) tizen.tvinputdevice.registerKey('Back'); } catch (err) {}
 
-/* ---------- Streaming ---------- */
 function setStatus(msg, live) {
   statusText.textContent = msg;
   statusText.className = live ? 'live' : '';
@@ -306,6 +295,12 @@ function startStream() {
   if (!currentUrl) return;
   const url = currentUrl;
   setStatus('Connecting...');
+
+  // Alert if Mixed Content blocking will occur
+  if (window.location.protocol === 'https:' && url.startsWith('http://')) {
+    setStatus('Blocked by browser (Mixed Content: HTTPS site cannot play insecure HTTP stream). Click "Open Direct in New Tab" above.');
+    return;
+  }
 
   if (window.Hls && Hls.isSupported()) {
     if (hls) { hls.destroy(); hls = null; }
